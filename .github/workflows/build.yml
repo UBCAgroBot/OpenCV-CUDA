@@ -1,0 +1,139 @@
+name: OpenCV Package Builds
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-image:
+    runs-on: [self-hosted, linux, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build -t opencv-cuda-builder:latest -f Dockerfile .
+
+  build-opencv-arm64:
+    needs: build-image
+    runs-on: [self-hosted, linux, arm64]
+    container:
+      image: opencv-cuda-builder:latest
+      options: 
+        --gpus all
+        --runtime nvidia
+        --network=host
+        -v /tmp:/tmp
+    env:
+      OPENCV_VER: "4.10.0"
+      CUDA_BIN: "8.7"
+      CUDA_PTX: ""
+      OUT_DIR: "/out"
+      JP_TAG: "jp6"
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Clean previous run artifacts
+        run: |
+          set -euo pipefail
+          rm -rf "${OUT_DIR}"
+          rm -rf /tmp/workspace
+
+      - name: Create output directory
+        run: |
+          set -euo pipefail
+          mkdir -p "${OUT_DIR}"
+          mkdir -p /tmp/workspace
+
+      - name: Download OpenCV sources
+        run: |
+          set -euo pipefail
+          cd /tmp/workspace
+          curl -fsSL -o "opencv-${OPENCV_VER}.zip" "https://github.com/opencv/opencv/archive/${OPENCV_VER}.zip"
+          curl -fsSL -o "opencv_contrib-${OPENCV_VER}.zip" "https://github.com/opencv/opencv_contrib/archive/${OPENCV_VER}.zip"
+          unzip -q "opencv-${OPENCV_VER}.zip" && unzip -q "opencv_contrib-${OPENCV_VER}.zip"
+          rm -f "opencv-${OPENCV_VER}.zip" "opencv_contrib-${OPENCV_VER}.zip"
+      
+      - name: Build OpenCV with CUDA
+        run: |
+          set -euo pipefail
+          cd /tmp/workspace
+          mkdir -p "opencv-${OPENCV_VER}/build"
+          cd "opencv-${OPENCV_VER}/build"
+          cmake -G Ninja .. \
+            -D CMAKE_BUILD_TYPE=Release \
+            -D CMAKE_INSTALL_PREFIX=/usr \
+            -D BUILD_SHARED_LIBS=ON \
+            -D OPENCV_GENERATE_PKGCONFIG=ON \
+            -D OPENCV_EXTRA_MODULES_PATH="/tmp/workspace/opencv_contrib-${OPENCV_VER}/modules" \
+            -D WITH_CUDA=ON \
+            -D BUILD_opencv_cudev=ON \
+            -D WITH_CUDNN=ON \
+            -D CUDA_ARCH_BIN="${CUDA_BIN}" \
+            -D CUDA_ARCH_PTX="${CUDA_PTX}" \
+            -D BUILD_LIST=core,imgproc,imgcodecs,calib3d,cudev,cudaarithm,cudafilters,cudaimgproc,cudawarping \
+            -D WITH_FFMPEG=OFF \
+            -D WITH_GSTREAMER=OFF \
+            -D WITH_LIBV4L=OFF \
+            -D BUILD_opencv_videoio=OFF \
+            -D BUILD_opencv_cudacodec=OFF \
+            -D WITH_NVCUVID=OFF \
+            -D WITH_NVCUVENC=OFF \
+            -D WITH_EIGEN=ON \
+            -D WITH_OPENBLAS=OFF \
+            -D WITH_LAPACK=OFF \
+            -D WITH_ATLAS=OFF \
+            -D WITH_TBB=OFF \
+            -D WITH_OPENMP=OFF \
+            -D WITH_IPP=OFF \
+            -D WITH_ITT=OFF \
+            -D WITH_OPENCL=OFF \
+            -D WITH_OPENGL=OFF \
+            -D BUILD_opencv_dnn=OFF \
+            -D BUILD_opencv_ml=OFF \
+            -D BUILD_opencv_face=OFF \
+            -D BUILD_opencv_wechat_qrcode=OFF \
+            -D WITH_VTK=OFF \
+            -D WITH_TESSERACT=OFF \
+            -D BUILD_opencv_world=OFF \
+            -D BUILD_JPEG=OFF \
+            -D BUILD_PNG=OFF \
+            -D BUILD_TIFF=OFF \
+            -D BUILD_WEBP=OFF \
+            -D WITH_JASPER=OFF \
+            -D WITH_OPENJPEG=OFF \
+            -D BUILD_opencv_python3=OFF \
+            -D BUILD_opencv_java=OFF \
+            -D BUILD_JAVA=OFF \
+            -D BUILD_opencv_js=OFF \
+            -D BUILD_opencv_julia=OFF \
+            -D BUILD_TESTS=OFF \
+            -D BUILD_PERF_TESTS=OFF \
+            -D BUILD_EXAMPLES=OFF \
+            -D BUILD_DOCS=OFF \
+            -D CPACK_GENERATOR=DEB \
+            -D CPACK_DEBIAN_PACKAGE_SHLIBDEPS=ON \
+            -D CPACK_PACKAGE_CONTACT="ubcagrobot@gmail.com" \
+            -D CPACK_PACKAGE_VENDOR="UBC Agrobot" \
+            -D CPACK_PACKAGE_VERSION="${OPENCV_VER}" \
+            -D CPACK_PACKAGE_NAME="opencv-${OPENCV_VER}-cuda" \
+            -D CPACK_PACKAGE_FILE_NAME="opencv-${OPENCV_VER}-${JP_TAG}_arm64" \
+            -D CPACK_MONOLITHIC_INSTALL=ON \
+            -D CPACK_DEB_COMPONENT_INSTALL=OFF
+          ninja -j$(nproc)
+          ninja package
+          ls -lh *.deb
+          dpkg-deb -I opencv-*.deb
+          cp -v ./*.deb "${OUT_DIR}/"
+          ls -lh "${OUT_DIR}" | sed 's/^/   /'
+      
+      - name: Create Release and Upload Package
+        uses: softprops/action-gh-release@v1
+        if: success()
+        with:
+          files: ${{ env.OUT_DIR }}/*.deb
+          tag_name: "opencv-${{ env.OPENCV_VER }}-${{ env.JP_TAG }}-${{ github.run_number }}"
+          name: "OpenCV ${{ env.OPENCV_VER }} CUDA (${{ env.JP_TAG }}) - Build ${{ github.run_number }}"
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
