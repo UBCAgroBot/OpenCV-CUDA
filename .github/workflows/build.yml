@@ -70,6 +70,8 @@ jobs:
             -D WITH_CUDNN=ON \
             -D CUDA_ARCH_BIN="${CUDA_BIN}" \
             -D CUDA_ARCH_PTX="${CUDA_PTX}" \
+            -D WITH_CUBLAS=ON \
+            -D CUDA_FAST_MATH=ON \
             -D BUILD_LIST=core,imgproc,imgcodecs,calib3d,cudev,cudaarithm,cudafilters,cudaimgproc,cudawarping \
             -D WITH_FFMPEG=OFF \
             -D WITH_GSTREAMER=OFF \
@@ -101,7 +103,7 @@ jobs:
             -D BUILD_WEBP=OFF \
             -D WITH_JASPER=OFF \
             -D WITH_OPENJPEG=OFF \
-            -D BUILD_opencv_python3=OFF \
+            -D BUILD_opencv_python3=ON \
             -D BUILD_opencv_java=OFF \
             -D BUILD_JAVA=OFF \
             -D BUILD_opencv_js=OFF \
@@ -125,7 +127,7 @@ jobs:
           dpkg-deb -I opencv-*.deb
           cp -v ./*.deb "${OUT_DIR}/"
           ls -lh "${OUT_DIR}" | sed 's/^/   /'
-      
+
       - name: Create Release and Upload Package
         uses: softprops/action-gh-release@v1
         if: success()
